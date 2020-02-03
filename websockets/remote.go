@@ -169,6 +169,41 @@ func (r *Remote) Tx(hash data.Hash256) (*TxResult, error) {
 	return cmd.Result, nil
 }
 
+func (r *Remote) accountTxWithError(account data.Account, c chan *TxWithError, pageSize int, minLedger, maxLedger int64) {
+	defer close(c)
+	cmd := newAccountTxCommand(account, pageSize, nil, minLedger, maxLedger)
+	for ; ; cmd = newAccountTxCommand(account, pageSize, cmd.Result.Marker, minLedger, maxLedger) {
+		r.outgoing <- cmd
+		<-cmd.Ready
+		if cmd.CommandError != nil {
+			glog.Errorln(cmd.Error())
+			txWitErr := TxWithError{Err: cmd.CommandError}
+			c <- &txWitErr
+			return
+		}
+		for _, tx := range cmd.Result.Transactions {
+			//c <- tx
+			txWitErr := TxWithError{Data: tx}
+			c <- &txWitErr
+		}
+		if cmd.Result.Marker == nil {
+			return
+		}
+	}
+}
+
+type TxWithError struct {
+	Err  *CommandError
+	Data *data.TransactionWithMetaData
+}
+
+func (r *Remote) AccountTxWithError(account data.Account, pageSize int, minLedger, maxLedger int64) chan *TxWithError {
+
+	c := make(chan *TxWithError)
+	go r.accountTxWithError(account, c, pageSize, minLedger, maxLedger)
+	return c
+}
+
 func (r *Remote) accountTx(account data.Account, c chan *data.TransactionWithMetaData, pageSize int, minLedger, maxLedger int64) {
 	defer close(c)
 	cmd := newAccountTxCommand(account, pageSize, nil, minLedger, maxLedger)
